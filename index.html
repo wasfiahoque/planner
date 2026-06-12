@@ -105,6 +105,9 @@
       <button class="nav-btn today" id="today-btn">Today</button>
       <button class="nav-btn" id="next" aria-label="Next week">›</button>
       <button class="nav-btn copy" id="copy-btn" title="Copy all of this week's tasks onto the same days next week">⧉ Copy → next week</button>
+      <button class="nav-btn copy" id="backup-btn" title="Download all your tasks as a backup file">⬇ Backup</button>
+      <button class="nav-btn copy" id="restore-btn" title="Restore tasks from a backup file">⬆ Restore</button>
+      <input type="file" id="restore-input" accept=".json,application/json" style="display:none">
     </div>
   </div>
 </div>
@@ -268,6 +271,55 @@
   $("next").addEventListener("click",()=>gotoWeek(Math.min(WEEKS.length-1,weekIdx+1)));
   $("today-btn").addEventListener("click",()=>gotoWeek(currentWeekIndex()));
   $("copy-btn").addEventListener("click",copyToNextWeek);
+
+  // ---------- Backup & restore ----------
+  $("backup-btn").addEventListener("click",()=>{
+    const backup={app:"weekly-planner-2026",exported:new Date().toISOString(),weeks:{}};
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.startsWith("blue2026-week-")){
+        try{backup.weeks[k]=JSON.parse(localStorage.getItem(k));}catch(e){}
+      }
+    }
+    const n=Object.keys(backup.weeks).length;
+    if(!n){flash("No tasks to back up yet");return;}
+    const blob=new Blob([JSON.stringify(backup,null,2)],{type:"application/json"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download=`planner-backup-${fmtKey(new Date())}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    flash(`Backed up ${n} week${n===1?"":"s"} ✓`);
+  });
+
+  $("restore-btn").addEventListener("click",()=>$("restore-input").click());
+  $("restore-input").addEventListener("change",e=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=()=>{
+      try{
+        const backup=JSON.parse(reader.result);
+        if(!backup.weeks||backup.app!=="weekly-planner-2026")throw new Error("not a planner backup");
+        let n=0;
+        for(const[k,weekData]of Object.entries(backup.weeks)){
+          if(!k.startsWith("blue2026-week-"))continue;
+          const existing=JSON.parse(localStorage.getItem(k)||"{}");
+          for(const[dayKey,tasks]of Object.entries(weekData)){
+            const have=existing[dayKey]||[];
+            const haveTexts=new Set(have.map(t=>t.text+"|"+t.done));
+            const add=(tasks||[]).filter(t=>!haveTexts.has(t.text+"|"+t.done));
+            if(add.length){existing[dayKey]=[...have,...add];n+=add.length;}
+          }
+          localStorage.setItem(k,JSON.stringify(existing));
+        }
+        data=load(weekIdx);render();
+        flash(n?`Restored ${n} task${n===1?"":"s"} ✓`:"Already up to date — nothing new to restore");
+      }catch(err){flash("That file doesn't look like a planner backup");}
+      e.target.value="";
+    };
+    reader.readAsText(file);
+  });
 
   grid.addEventListener("click",e=>{
     const btn=e.target.closest("[data-action]");
