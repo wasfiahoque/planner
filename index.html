@@ -65,6 +65,9 @@
   .task.done .check{border-color:var(--navy);background:var(--navy)}
   .task-text{flex:1;font-size:13.5px;font-weight:500;line-height:1.45;color:var(--navy);word-break:break-word}
   .task.done .task-text{text-decoration:line-through;text-decoration-color:rgba(14,77,146,.55)}
+  .time-badge{display:inline-block;background:var(--navy);color:#fff;font:700 10px var(--mono);
+    border-radius:6px;padding:1.5px 6px;margin-right:6px;vertical-align:1px;white-space:nowrap}
+  .task.done .time-badge{opacity:.55}
   .del{border:none;background:none;color:var(--blue);cursor:pointer;font-size:14px;padding:0 2px;opacity:0;transition:opacity .15s}
   .task:hover .del{opacity:1}
 
@@ -138,6 +141,27 @@
   const grid=$("grid");
   const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
+  // Detect a time at the start of a task, e.g. "9am", "9:30", "9.30pm", "14:00"
+  // Requires a colon/dot or am/pm so plain numbers ("3 figures to make") aren't mistaken for times.
+  function parseTime(text){
+    const m=text.match(/^\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|AM|PM|a\.m\.|p\.m\.)?\s*[-–—:,]?\s+(.+)$/);
+    if(!m)return null;
+    let[,h,mm,ap,rest]=m;
+    if(!mm&&!ap)return null;                 // bare number → not a time
+    h=parseInt(h,10);mm=mm?parseInt(mm,10):0;
+    if(h>23||mm>59)return null;
+    if(ap){const p=ap.toLowerCase().startsWith("p");
+      if(p&&h<12)h+=12; if(!p&&h===12)h=0;}
+    const minutes=h*60+mm;
+    const h12=h%12===0?12:h%12, suffix=h<12?"AM":"PM";
+    const label=mm?`${h12}:${String(mm).padStart(2,"0")} ${suffix}`:`${h12} ${suffix}`;
+    return {minutes,label,rest};
+  }
+  const timeSort=list=>[...list].sort((a,b)=>{
+    const ta=parseTime(a.text),tb=parseTime(b.text);
+    return (ta?ta.minutes:1e9)-(tb?tb.minutes:1e9);
+  });
+
   function setStatus(msg){ $("status").textContent=msg; }
   function flash(msg){
     setStatus(msg);
@@ -148,10 +172,14 @@
 
   // ---------- Render ----------
   function taskHTML(t,dayKey){
+    const pt=parseTime(t.text);
+    const body=pt
+      ?`<span class="time-badge">${pt.label}</span>${esc(pt.rest)}`
+      :esc(t.text);
     return `<div class="task${t.done?" done":""}" draggable="true" data-day="${dayKey}" data-id="${t.id}" title="Drag to another day to move">
       <span class="grip" aria-hidden="true">⋮⋮</span>
       <button class="check" data-action="toggle" aria-label="${t.done?"Move back to planned":"Mark completed"}">${t.done?"✓":""}</button>
-      <span class="task-text">${esc(t.text)}</span>
+      <span class="task-text">${body}</span>
       <button class="del" data-action="delete" aria-label="Delete task">×</button>
     </div>`;
   }
@@ -165,7 +193,7 @@
 
     grid.innerHTML=week.days.map(d=>{
       const k=fmtKey(d),tasks=data[k]||[];
-      const planned=tasks.filter(t=>!t.done),completed=tasks.filter(t=>t.done);
+      const planned=timeSort(tasks.filter(t=>!t.done)),completed=timeSort(tasks.filter(t=>t.done));
       const today=isToday(d);
       return `<div class="card${today?" today":""}" data-day="${k}">
         <div class="card-head">
@@ -180,7 +208,7 @@
           <div><span class="chip">Planned</span></div>
           ${planned.length?planned.map(t=>taskHTML(t,k)).join(""):`<div class="empty">No tasks yet</div>`}
           <div class="add-row">
-            <input class="add-input" data-day="${k}" placeholder="Add a task" aria-label="Add task for ${MONTHS[d.getMonth()]} ${d.getDate()}">
+            <input class="add-input" data-day="${k}" placeholder="Add a task (try: 9am Meeting)" aria-label="Add task for ${MONTHS[d.getMonth()]} ${d.getDate()}">
             <button class="add-btn" data-action="add" data-day="${k}" aria-label="Add task">+</button>
           </div>
           ${completed.length?`<div class="divider"><span class="chip">Completed</span></div>${completed.map(t=>taskHTML(t,k)).join("")}`:""}
